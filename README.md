@@ -95,3 +95,14 @@ Coordinates must be a shared metric road-plane system for metric indicators. Pix
 ## Known integration limits
 
 SUMO binaries, an OSM extract, connected edge paths, detector weights, a permitted real clip, camera calibration, and hand-checked labels are external inputs. The route generator cannot infer valid intersection edge paths automatically. SUMO's encounter output schemas depend on its version; the parser preserves encounter values and comparison is reported only for matched IDs/measurements. Hotspots use metric grid cells until road-segment geometry is supplied. PET is sampled at observed timestamps, so the zone-entry/exit time is approximate.
+
+
+## Random Forest source-method screening
+
+The optional pipeline extra includes scikit-learn. To use the Knowledge PET3D Random Forest, download/extract only the trajectory and published conflict CSVs for Location A and Location B outside Git, then follow [the data provenance and training guide](docs/KNOWLEDGE_PET3D_PROVENANCE.md).
+
+The classifier's label is whether the published source method flagged an interaction in the next two seconds. “Not flagged” is not a confirmed safe example or a crash prediction. Existing TTC/PET rule analysis remains available without a model; pass --risk-model to analyze only after training an artifact. The raw dataset and videos stay outside the repository.
+
+## Video detector evaluation
+
+For the permitted original clip, the 100-frame annotation and IoU 0.5 scoring workflow is documented in [Video detector evaluation](docs/VIDEO_DETECTION_EVALUATION.md). The committed clip-01 evidence video is annotated output, so it is not an independent detector input.

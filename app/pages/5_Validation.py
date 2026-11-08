@@ -55,9 +55,47 @@ else:
 st.subheader("Detector metrics")
 det = validation.get("detection_metrics", {})
 if det:
-    st.dataframe(pd.DataFrame([det]).rename(columns=pretty), hide_index=True, **STRETCH)
+    if det.get("per_class"):
+        st.caption(f"IoU threshold: {det.get('iou_threshold', 'n/a')}; reviewed frames: {det.get('evaluated_frame_count', 'n/a')}.")
+        detector_table = pd.DataFrame.from_dict(det["per_class"], orient="index").rename_axis("Class").reset_index()
+        st.dataframe(detector_table.rename(columns=pretty), hide_index=True, **STRETCH)
+    else:
+        st.dataframe(pd.DataFrame([det]).rename(columns=pretty), hide_index=True, **STRETCH)
 else:
-    st.caption("No detector comparison is attached. Ground-truth tracks were used for this run.")
+    st.caption("No hand-labeled detector comparison is attached to this run.")
+
+# --- Random Forest proxy-label evaluation ----------------------------------
+risk = validation.get("risk_model", {})
+if risk:
+    st.subheader("Random Forest: source-method flag screening")
+    st.warning(
+        "The model learns whether Knowledge PET3D's published method flags an interaction. "
+        "A negative label means the source method did not flag it; it does not mean the interaction is safe.",
+        icon="⚠️",
+    )
+    held_out = risk.get("held_out_evaluation", {})
+    aggregate = held_out.get("aggregate_held_out_metrics", {})
+    a, b, c, d = st.columns(4)
+    pr_auc = held_out.get("held_out_pr_auc")
+    a.metric("Held-out PR-AUC", f"{pr_auc:.3f}" if isinstance(pr_auc, (int, float)) else "n/a")
+    for col, label in ((b, "Precision"), (c, "Recall"), (d, "F1")):
+        value = aggregate.get(label.lower())
+        col.metric(f"Held-out {label}", f"{value:.3f}" if isinstance(value, (int, float)) else "n/a")
+    folds = held_out.get("folds", [])
+    if folds:
+        st.caption("Each row holds out one location; the threshold is selected on separate recording groups from the training location. These proxy-label scores are not directly comparable with TTC/PET event-matching metrics because they use a different target.")
+        st.dataframe(pd.DataFrame(folds)[[
+            "train_location", "test_location", "threshold", "pr_auc_average_precision",
+            "precision", "recall", "f1", "confusion_counts",
+        ]], hide_index=True, **STRETCH)
+    importance = held_out.get("permutation_feature_importance", [])
+    if importance:
+        st.subheader("Held-out permutation feature importance")
+        st.dataframe(pd.DataFrame(importance).head(15), hide_index=True, **STRETCH)
+    if risk.get("score_note"):
+        st.caption(risk["score_note"])
+    else:
+        st.caption(f"Scores exported for {risk.get('score_rows', 0)} pair windows. See model_scores.csv in this run's result folder.")
 
 src = validation.get("source_comparison", {})
 if src and src.get("comparisons"):

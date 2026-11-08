@@ -16,20 +16,29 @@ This guide describes the files in the PS-02 Vision Zero project and how they fit
 
 - `__init__.py` — Marks `vision_zero` as an importable Python package.
 - `schema.py` — Shared data records for track observations, candidate risk events, and hotspot summaries.
-- `cli.py` — Defines the `vision-zero` command line interface: analyze tracks, prepare SUMO networks/configs/routes, simulate, detect video tracks, calibrate a camera transform, and score detection predictions.
+- `cli.py` — Defines the `vision-zero` command line interface: analyze tracks, prepare SUMO networks/configs/routes, simulate, detect video tracks, calibrate a camera transform, prepare/train the optional RF model, sample video frames for annotation, and score detections.
 - `pipeline.py` — Connects ingestion-ready track records to TTC/PET event screening, validation, hotspot aggregation, report writing, and versioned run outputs.
 - `ingest.py` — Reads and normalizes track CSV files, maps road-user classes into groups, and estimates velocities while flagging track-quality issues.
 - `indicators.py` — Detects candidate time-to-collision (TTC) events from short-horizon motion estimates and classifies conflict types and severity bands.
 - `pet.py` — Estimates post-encroachment time (PET) for road users traversing configured shared conflict zones.
 - `hotspots.py` — Groups candidate events into metric grid cells and calculates counts, exposure context, rates, rough intervals, and dominant patterns.
 - `validation.py` — Compares event sets and data sources, reports threshold sensitivity and SUMO SSM agreement, and can compare results with expected seeded events.
-- `detection_metrics.py` — Scores hand-checked object detections using bounding-box intersection-over-union, precision, and recall.
+- `detection_metrics.py` — Scores hand-checked object detections using bounding-box intersection-over-union, precision, and recall; it also samples source-video frames and reads the reviewed-frame manifest.
 - `sumo.py` — Wraps local SUMO tools to build networks, write simulation configuration, run simulations, and read FCD tracks and SSM encounters.
 - `scenario.py` — Writes repeatable SUMO route files for crossing, turning, bike cut-across, or control scenarios using supplied connected edge paths.
 - `vision.py` — Renders synthetic tracks into video and optionally runs Ultralytics detection/tracking to produce track records and prediction outputs.
 - `calibration.py` — Fits an image-to-road-plane homography from paired image and surveyed ground landmarks and reports its fit error.
+- risk_model.py — Prepares causal trajectory-pair windows with Knowledge PET3D source-method proxy labels, performs location-held-out Random Forest evaluation, saves the trained artifact/schema, and optionally scores metric-coordinate analysis tracks.
 - `report.py` — Writes run tables and engineer-facing summaries in CSV, GeoJSON, Markdown, HTML, and PDF formats.
 - `privacy.py` — Checks generated/displayed text for restricted blame language and verifies that dashboard evidence files stay inside the designated safe-evidence folder.
+
+
+## docs/ — Data and evaluation guides
+
+- KNOWLEDGE_PET3D_PROVENANCE.md — Dataset attribution, local input layout, proxy-label definition, and RF preparation/training commands.
+- VIDEO_DETECTION_EVALUATION.md — External source-video sampling, hand-labeling, and detector scoring workflow; records the limits of current two-frame evidence.
+- IMPLEMENTATION_CHANGELOG.md — Change-by-change record of the RF/detector plan implementation, verification status, remaining data dependencies, and Colab Drive extraction script.
+
 
 ## `app/` — Streamlit review dashboard
 
@@ -63,4 +72,4 @@ This guide describes the files in the PS-02 Vision Zero project and how they fit
 4. The Streamlit pages use `app/lib/data.py` to read that saved bundle. The dashboard does not run simulation or model inference live.
 5. `README.md` and the two planning/setup documents describe how to configure inputs, run the workflow, and interpret its limits.
 
-SUMO binaries, OSM extracts, camera footage, trained weights, calibration landmarks, and hand-checked labels are user-supplied local inputs. Generated run folders and model/video files are not source files and are excluded or kept local according to `.gitignore`.
+SUMO binaries, OSM extracts, camera footage, trained weights, calibration landmarks, and Knowledge PET3D source files and hand-checked labels are user-supplied local inputs. Generated run folders and model/video files are not source files and are excluded or kept local according to `.gitignore`.

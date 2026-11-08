@@ -25,6 +25,7 @@ pipeline = [
   "sumolib==1.22.0",
   "pyproj",
   "reportlab==4.3.1",
+  "scikit-learn==1.6.1",
 ]
 
 [project.scripts]

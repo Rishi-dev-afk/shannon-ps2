@@ -118,6 +118,26 @@ def _write_summary(path: Path, points, events, hotspots, validation: dict) -> No
         lines.append("- Hand-checked detector precision/recall by class:")
         lines.extend(f"  - {name}: precision {values.get('precision')}; recall {values.get('recall')}"
                      for name, values in sorted(detection.items()))
+    risk = validation.get("risk_model", {})
+    if risk:
+        held_out = risk.get("held_out_evaluation", {})
+        aggregate = held_out.get("aggregate_held_out_metrics", {})
+        lines += ["", "## Random Forest proxy-label evaluation", ""]
+        lines.append(f"- Model: {risk.get('model_version')}; source label: {risk.get('label_source')}.")
+        lines.append(f"- Held-out location PR-AUC: {held_out.get('held_out_pr_auc')}; "
+                     f"precision {aggregate.get('precision')}; recall {aggregate.get('recall')}; "
+                     f"F1 {aggregate.get('f1')}; confusion counts {aggregate.get('confusion_counts')}.")
+        lines.append(f"- Interpretation: {risk.get('label_caveat')}")
+        lines.append("- These proxy-label scores use a different target from TTC/PET event-matching metrics and should not be compared as if they were the same evaluation.")
+        if risk.get("score_note"):
+            lines.append(f"- Score export note: {risk.get('score_note')}")
+        else:
+            lines.append(f"- Scored pair windows exported: {risk.get('score_rows', 0)}")
+        importance = held_out.get("permutation_feature_importance", [])[:8]
+        if importance:
+            lines.append("- Held-out permutation importance (top features):")
+            lines.extend(f"  - {item.get('feature')}: {item.get('mean_importance'):.5f}"
+                         for item in importance)
     seeded = validation.get("seeded_scenarios", {})
     if seeded:
         lines.append(f"- Seeded scenario recall: {seeded.get('event_recall')}; extra candidate events: {seeded.get('extra_candidate_events')}")

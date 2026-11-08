@@ -8,10 +8,11 @@ from pathlib import Path
 from .pipeline import analyze_run
 from .ingest import load_tracks
 from .scenario import generate_seeded_routes
-from .detection_metrics import detection_precision_recall
+from .detection_metrics import detection_precision_recall, sample_video_frames_for_annotation
 from .sumo import build_osm_network, read_fcd, read_ssm_values, run_sumo, write_sumocfg
 from .vision import detect_and_track, render_track_frames
 from .calibration import fit_homography
+from .risk_model import prepare_risk_data, train_risk_model
 
 
 def main() -> None:
@@ -28,7 +29,20 @@ def main() -> None:
     analyze.add_argument("--zones-json", default=None)
     analyze.add_argument("--detection-labels", default=None)
     analyze.add_argument("--detection-predictions", default=None)
+    analyze.add_argument("--detection-frames-csv", default=None, help="manifest of all reviewed frames, including empty frames")
     analyze.add_argument("--expected-events-csv", default=None)
+    analyze.add_argument("--risk-model", default=None, help="optional trained Random Forest artifact for pair-window scoring")
+
+    prepare = commands.add_parser("prepare-risk-data", help="prepare Knowledge PET3D pair windows with source-method proxy labels")
+    prepare.add_argument("dataset_root")
+    prepare.add_argument("output_csv")
+    prepare.add_argument("--sample-every-s", type=float, default=1.0)
+    prepare.add_argument("--candidate-radius-m", type=float, default=50.0)
+
+    train = commands.add_parser("train-risk-model", help="train and location-held-out evaluate the Random Forest")
+    train.add_argument("pair_windows_csv")
+    train.add_argument("--model-out", default="outputs/models/knowledge-pet3d-rf.joblib")
+    train.add_argument("--metrics-out", default=None)
 
     network = commands.add_parser("build-network", help="convert a local OSM extract to SUMO net.xml")
     network.add_argument("osm_file")
@@ -55,6 +69,7 @@ def main() -> None:
     simulate.add_argument("--render", action="store_true")
     simulate.add_argument("--weights", default=None, help="optional YOLO weights for rendered frames")
     simulate.add_argument("--detection-labels", default=None)
+    simulate.add_argument("--detection-frames-csv", default=None)
 
     detect = commands.add_parser("detect", help="run YOLO tracking on a video")
     detect.add_argument("video")
@@ -64,11 +79,18 @@ def main() -> None:
     detect.add_argument("--run-id", default=None)
     detect.add_argument("--homography-json", default=None)
     detect.add_argument("--detection-labels", default=None)
+    detect.add_argument("--detection-frames-csv", default=None)
 
     metrics = commands.add_parser("detection-metrics", help="score a hand-checked detection sample")
     metrics.add_argument("labels_csv")
     metrics.add_argument("predictions_csv")
     metrics.add_argument("--iou", type=float, default=0.5)
+    metrics.add_argument("--frames-csv", default=None, help="sampled-frame manifest, including reviewed empty frames")
+
+    sample_frames = commands.add_parser("sample-video-frames", help="sample a source clip for hand annotation")
+    sample_frames.add_argument("video")
+    sample_frames.add_argument("output_dir")
+    sample_frames.add_argument("--count", type=int, default=100)
 
     calibrate = commands.add_parser("calibrate", help="fit a road-plane homography from landmarks JSON")
     calibrate.add_argument("landmarks_json", help="JSON with image_points and ground_points_m arrays")
@@ -77,6 +99,15 @@ def main() -> None:
 
     args = parser.parse_args()
     run_id = getattr(args, "run_id", None) or uuid.uuid4().hex[:10]
+    if args.command == "prepare-risk-data":
+        result = prepare_risk_data(args.dataset_root, args.output_csv, sample_every_s=args.sample_every_s,
+                                   candidate_radius_m=args.candidate_radius_m)
+        print(json.dumps(result, indent=2))
+        return
+    if args.command == "train-risk-model":
+        result = train_risk_model(args.pair_windows_csv, args.model_out, metrics_out=args.metrics_out)
+        print(json.dumps(result, indent=2))
+        return
     if args.command == "build-network":
         build_osm_network(args.osm_file, args.output_net)
         print(f"Built SUMO network: {args.output_net}")
@@ -92,9 +123,14 @@ def main() -> None:
                                demand=args.demand, conflict_mode=args.conflict_mode)
         print(f"Wrote seeded route file: {args.output_routes}")
         return
+    if args.command == "sample-video-frames":
+        result = sample_video_frames_for_annotation(args.video, args.output_dir, count=args.count)
+        print(json.dumps(result, indent=2))
+        return
     if args.command == "detection-metrics":
         print(json.dumps(detection_precision_recall(args.labels_csv, args.predictions_csv,
-                                                      iou_threshold=args.iou), indent=2))
+                                                      iou_threshold=args.iou,
+                                                      evaluated_frames_csv=args.frames_csv), indent=2))
         return
     if args.command == "calibrate":
         landmarks = json.loads(Path(args.landmarks_json).read_text(encoding="utf-8"))
@@ -110,12 +146,15 @@ def main() -> None:
         zones = json.loads(Path(args.zones_json).read_text(encoding="utf-8")) if args.zones_json else None
         detection_metrics = None
         if args.detection_labels and args.detection_predictions:
-            detection_metrics = detection_precision_recall(args.detection_labels, args.detection_predictions)
+            detection_metrics = detection_precision_recall(
+                args.detection_labels, args.detection_predictions,
+                evaluated_frames_csv=args.detection_frames_csv)
         run_dir = analyze_run(points, args.out, run_id=run_id, source_type=args.source_type,
                               max_ttc_s=args.max_ttc_s, max_pet_s=args.max_pet_s,
                               cell_size_m=args.cell_size_m, zones=zones,
                               detection_metrics=detection_metrics,
-                              expected_events_csv=args.expected_events_csv)
+                              expected_events_csv=args.expected_events_csv,
+                              risk_model_path=args.risk_model)
         print(f"Analyzed {len(points)} observations; results: {run_dir}")
         return
     if args.command == "simulate":
@@ -136,7 +175,9 @@ def main() -> None:
         detection_metrics = None
         prediction_file = Path(args.out) / "runs" / run_id / "detection_predictions.csv"
         if args.detection_labels and prediction_file.exists():
-            detection_metrics = detection_precision_recall(args.detection_labels, prediction_file)
+            detection_metrics = detection_precision_recall(
+                args.detection_labels, prediction_file,
+                evaluated_frames_csv=args.detection_frames_csv)
         source_label = "sumo_gt+sumo_detected" if any(p.source_type == "sumo_detected" for p in points) else "sumo_gt"
         run_dir = analyze_run(points, args.out, run_id=run_id, source_type=source_label,
                               ssm_rows=ssm_rows, detection_metrics=detection_metrics)
@@ -149,8 +190,9 @@ def main() -> None:
         points = detect_and_track(args.video, args.weights, source_id=args.source_id,
                                   source_type="video", homography=homography,
                                   predictions_csv=predictions_path)
-        detection_metrics = (detection_precision_recall(args.detection_labels, predictions_path)
-                             if args.detection_labels else None)
+        detection_metrics = (detection_precision_recall(
+            args.detection_labels, predictions_path,
+            evaluated_frames_csv=args.detection_frames_csv) if args.detection_labels else None)
         run_dir = analyze_run(points, args.out, run_id=run_id, source_type="video",
                               detection_metrics=detection_metrics)
         print(f"Detection complete; results: {run_dir}")

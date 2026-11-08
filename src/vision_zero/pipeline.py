@@ -25,6 +25,7 @@ def analyze_run(
     ssm_rows: list[dict] | None = None,
     detection_metrics: dict | None = None,
     expected_events_csv: str | Path | None = None,
+    risk_model_path: str | Path | None = None,
 ) -> Path:
     run_dir = Path(output_root) / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -39,6 +40,11 @@ def analyze_run(
             pet.extend(detect_pet_events(selected, zones, max_pet_s=max_pet_s))
     events = sorted(ttc + pet, key=lambda e: (e.timestamp_s, e.indicator_type))
     hotspots = aggregate_hotspots(events, points, cell_size_m=cell_size_m)
+    risk_scores = []
+    risk_model_summary = None
+    if risk_model_path:
+        from .risk_model import score_track_points, write_model_scores
+        risk_scores, risk_model_summary = score_track_points(risk_model_path, points)
     validation = {
         "source_comparison": compare_sources(points, max_ttc_s=max_ttc_s),
         "threshold_sensitivity": threshold_sensitivity(metric_points, base_ttc_s=max_ttc_s),
@@ -48,8 +54,11 @@ def analyze_run(
         "seeded_scenarios": (validate_seeded_events(events, expected_events_csv)
                              if expected_events_csv else {}),
         "quality_banner": _quality_banner(points),
+        "risk_model": risk_model_summary or {},
     }
     write_outputs(run_dir, points, events, hotspots, validation=validation)
+    if risk_model_path:
+        write_model_scores(run_dir / "model_scores.csv", risk_scores)
     _write_tracks(run_dir / "tracks.csv", points)
     _write_parquet_bundle(run_dir, points, events, hotspots)
     (run_dir / "validation.json").write_text(json.dumps(validation, indent=2), encoding="utf-8")
